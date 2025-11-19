@@ -34,9 +34,9 @@ ORG &2000
     jsr newline
 
     ; Initialize with seed 5489
-    LDA #&11
+    LDA #LO(5489)
     STA w0 + 0
-    LDA #&15
+    LDA #HI(5489)
     STA w0 + 1
     LDA #0
     STA w0 + 2
