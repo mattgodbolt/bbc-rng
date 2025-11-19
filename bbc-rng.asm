@@ -436,6 +436,11 @@ ENTROPY_SAMPLES = ENTROPY_COUNT * 2
     LDA filename+2: JSR oswrch
     LDA #129: JSR oswrch
 
+    LDA #LO(load_buffer): STA osfile_block + 2
+    LDA #HI(load_buffer): STA osfile_block + 3
+    LDA #0: STA osfile_block + 4
+    STA osfile_block + 5
+    STA osfile_block + 6
     LDA #&FF
     LDX #LO(osfile_block)
     LDY #HI(osfile_block)
@@ -445,7 +450,7 @@ ENTROPY_SAMPLES = ENTROPY_COUNT * 2
 .filename EQUS "D.0", 13
 .osfile_block
     EQUW filename
-    EQUD load_buffer ; TODO no idea why this isn't be honoured. I had to hack the load address in the SAVE
+    EQUD 0
     EQUD 0
     EQUD 0
     EQUD 0
@@ -1199,6 +1204,6 @@ ORG 0
 .data EQUS "I am just data we don't care about"
 .end
 FOR n, 0, 15
-    SAVE "D."+STR$~(n), data, data + DUMMY_FILE_SIZE, 0, load_buffer
+    SAVE "D."+STR$~(n), data, data + DUMMY_FILE_SIZE, 0, 0
 NEXT
 }
