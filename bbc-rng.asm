@@ -332,7 +332,7 @@ ORG &2000
     LDA w0 + 1: JSR printHex
     LDA #131: JSR oswrch
     LDA #'(': JSR oswrch
-    LDA temp: JSR printHex
+    LDA #31: SEC: SBC temp: JSR printHex
     JSR print0: EQUS "/20)", 13, 0
 
     ; Mix into entropy[entropy_idx]
