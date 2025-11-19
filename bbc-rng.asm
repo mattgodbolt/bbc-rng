@@ -2,6 +2,7 @@ ORG &70
 .ptr            SKIP 2
 .mt_index       SKIP 2      ; Current index (word)
 .loop_index     SKIP 2      ; 16-bit loop counter
+.k_counter      SKIP 2      ; 16-bit counter for init_by_array
 .state_ptr      SKIP 2      ; Pointer for state array access
 .w0             SKIP 4      ; 32-bit work registers
 .w1             SKIP 4
@@ -9,39 +10,42 @@ ORG &70
 .w3             SKIP 4
 .temp           SKIP 4
 .result         SKIP 4
+.current_file   SKIP 1      ; Current D.x file for entropy
+.entropy_idx    SKIP 1      ; Index into entropy array (0-15)
 
 oswrch = &FFEE
+osfile = &FFDD
 
 \ Constants
 MT_N = 624
 MT_M = 397
-MT_MATRIX_A = &9908B0DF     ; Constant vector a
-MT_UPPER_MASK = &80000000   ; Most significant bit
-MT_LOWER_MASK = &7FFFFFFF   ; Least significant 31 bits
+ENTROPY_COUNT = 16
 
-\ State array lives at &3000 (624 * 4 = 2496 bytes)
-STATE_BASE = &3000
+\ VIA timer for entropy collection (User VIA Timer 1)
+VIA_T1CL = &FE64
+VIA_T1CH = &FE65
 
 ORG &2000
 
 .start
     LDA #22:JSR oswrch
     LDA #7:JSR oswrch
-    LDA #title MOD 256:STA ptr
-    LDA #title DIV 256:STA ptr+1
+    LDA #LO(title):STA ptr
+    LDA #HI(title):STA ptr+1
     JSR print
     JSR print
     jsr newline
 
-    ; Initialize with seed 5489
-    LDA #LO(5489)
-    STA w0 + 0
-    LDA #HI(5489)
-    STA w0 + 1
-    LDA #0
-    STA w0 + 2
-    STA w0 + 3
-    JSR mt_init
+    ; Collect entropy from disc seeks and initialize MT
+    JSR collect_entropy
+    LDA #LO(init_array_msg):STA ptr
+    LDA #HI(init_array_msg):STA ptr+1
+    JSR print
+    JSR mt_init_by_array
+
+    LDA #LO(here_we_go):STA ptr
+    LDA #HI(here_we_go):STA ptr+1
+    JSR print
 
     ; Generate first 10 numbers and print them
     LDX #10
@@ -59,18 +63,6 @@ ORG &2000
     JSR printHex
     JSR newline
 
-\ First 10 values for seed 5489 should be: https://godbolt.org/z/4bK4xbP4a
-\ 0xD091BB5C
-\ 0x22AE9EF6
-\ 0xE7E1FAEE
-\ 0xD5C31F79
-\ 0x2082352C
-\ 0xF807B7DF
-\ 0xE9D30005
-\ 0x3895AFE1
-\ 0xA1E24BBA
-\ 0x4EE4092B
-
     PLA:TAX    
     DEX
     BNE loop
@@ -78,6 +70,9 @@ ORG &2000
 .done
     JMP done
 
+.init_array_msg EQUS "Initialising MT19937 with entropy...", 10, 13, 0
+.title EQUS 141, 134, "BBC Micro disc Drive RNG", 10, 13, 0
+.here_we_go EQUS 10, 13, "Generating random numbers:", 10, 13, 0
 
 .newline
     lda #10:JSR oswrch:lda #13:JMP oswrch
@@ -117,9 +112,6 @@ ORG &2000
     JSR oswrch
     RTS
 }
-
-.title EQUS 141, 134, "BBC Micro Disk Drive RNG", 10, 13, 0
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; from claude!
 
@@ -279,6 +271,187 @@ ORG &2000
 }
 
 \ ============================================================================
+\ Entropy Collection
+\ ============================================================================
+
+\ Zero the entropy array
+.zero_entropy
+{
+    LDA #0
+    LDX #ENTROPY_COUNT * 4 - 1
+.loop
+    STA entropy_array, X
+    DEX
+    BPL loop
+    RTS
+}
+
+\ Collect entropy from disc seeks
+\ Performs 32 disc seeks, mixing timing into 16 entropy words
+.collect_entropy
+{
+    LDA #LO(msg):STA ptr
+    LDA #HI(msg):STA ptr+1
+    JSR print
+
+    JSR zero_entropy
+
+    ; Get initial file from timer
+    LDA VIA_T1CL
+    AND #&0F
+    STA current_file
+
+    ; Initialize entropy index
+    LDA #0
+    STA entropy_idx
+
+    ; Loop counter in temp (reuse)
+    LDA #32
+    STA temp
+
+.collect_loop
+    ; Read start time
+    LDA VIA_T1CL
+    STA w0
+    LDA VIA_T1CH
+    STA w0 + 1
+
+    ; Load the file D.{current_file}
+    JSR load_entropy_file
+
+    ; Read end time and calculate difference
+    SEC
+    LDA VIA_T1CL
+    SBC w0
+    STA w0              ; Low byte of difference
+    LDA VIA_T1CH
+    SBC w0 + 1
+    STA w0 + 1          ; High byte of difference
+
+    LDA w0: JSR printHex
+    LDA w0 + 1: JSR printHex
+    JSR newline
+
+    ; Mix into entropy[entropy_idx]
+    ; entropy = ROL(entropy, 5) XOR sample
+
+    ; Calculate entropy array address
+    LDA entropy_idx
+    ASL A
+    ASL A
+    CLC
+    ADC #LO(entropy_array)
+    STA state_ptr
+    LDA #HI(entropy_array)
+    ADC #0
+    STA state_ptr + 1
+
+    ; Load entropy word into w2
+    LDY #0
+    LDA (state_ptr), Y
+    STA w2 + 0
+    INY
+    LDA (state_ptr), Y
+    STA w2 + 1
+    INY
+    LDA (state_ptr), Y
+    STA w2 + 2
+    INY
+    LDA (state_ptr), Y
+    STA w2 + 3
+
+    ; Rotate w2 right by 3 (= rotate left by 5)
+    LDX #3
+.rotate
+    LSR w2 + 3
+    ROR w2 + 2
+    ROR w2 + 1
+    ROR w2 + 0
+    DEX
+    BNE rotate
+
+    ; XOR with sample (16-bit)
+    LDA w2 + 0
+    EOR w0
+    STA w2 + 0
+    LDA w2 + 1
+    EOR w0 + 1
+    STA w2 + 1
+
+    ; Store back to entropy array
+    LDY #0
+    LDA w2 + 0
+    STA (state_ptr), Y
+    INY
+    LDA w2 + 1
+    STA (state_ptr), Y
+    INY
+    LDA w2 + 2
+    STA (state_ptr), Y
+    INY
+    LDA w2 + 3
+    STA (state_ptr), Y
+
+    ; Update entropy_idx = (entropy_idx + 1) AND 15
+    LDA entropy_idx
+    CLC
+    ADC #1
+    AND #&0F
+    STA entropy_idx
+
+    ; Update current_file = sample AND &0F
+    LDA w0
+    AND #&0F
+    STA current_file
+
+    ; Decrement loop counter
+    DEC temp
+    BEQ collect_done
+    JMP collect_loop
+
+.collect_done
+    RTS
+.msg EQUS "Collecting entropy...", 0
+}
+
+\ Load file D.{current_file}
+.load_entropy_file
+{
+    ; Build filename "D.x" where x is hex digit
+    LDA current_file
+    CMP #10
+    BCC is_digit
+    ADC #('A' - 10 - 1)
+    JMP store_char
+.is_digit
+    ADC #'0'
+.store_char
+    STA filename + 2
+
+    LDA #LO(loading_msg):STA ptr
+    LDA #HI(loading_msg):STA ptr+1
+    JSR print
+    LDA filename: JSR oswrch
+    LDA filename+1: JSR oswrch
+    LDA filename+2: JSR oswrch
+    LDA #32: JSR oswrch
+
+    LDA #&FF
+    LDX #LO(osfile_block)
+    LDY #HI(osfile_block)
+    JMP osfile
+.loading_msg EQUS "Timing ", 0
+}
+
+.filename EQUS "D.0", 13
+.osfile_block
+    EQUD filename
+    EQUD load_buffer
+    EQUD 0
+    EQUD 0
+    EQUD 0
+
+\ ============================================================================
 \ MT19937 Implementation
 \ ============================================================================
 
@@ -295,13 +468,13 @@ ORG &2000
     ; * 2 again
     ASL state_ptr
     ROL state_ptr + 1
-    ; Add STATE_BASE
+    ; Add state_array base
     CLC
     LDA state_ptr
-    ADC #LO(STATE_BASE)
+    ADC #LO(state_array)
     STA state_ptr
     LDA state_ptr + 1
-    ADC #HI(STATE_BASE)
+    ADC #HI(state_array)
     STA state_ptr + 1
     RTS
 }
@@ -436,6 +609,316 @@ ORG &2000
 
 .init_done
     ; Reset index to MT_N to force twist on first use
+    LDA #LO(MT_N)
+    STA mt_index
+    LDA #HI(MT_N)
+    STA mt_index + 1
+
+    RTS
+}
+
+\ Initialize MT with array of seeds (at ENTROPY_BASE, ENTROPY_COUNT elements)
+\ Standard MT19937 init_by_array algorithm
+.mt_init_by_array
+{
+    ; First initialize with fixed seed 19650218 (&012BC86A)
+    LDA #&6A
+    STA w0 + 0
+    LDA #&C8
+    STA w0 + 1
+    LDA #&2B
+    STA w0 + 2
+    LDA #&01
+    STA w0 + 3
+    JSR mt_init
+
+    ; i = 1, j = 0
+    LDA #1
+    STA loop_index
+    LDA #0
+    STA loop_index + 1
+    STA entropy_idx         ; j = 0
+
+    ; k = max(N, key_length) = N since N > 16
+    ; We'll do N iterations for first loop
+    LDA #LO(MT_N)
+    STA k_counter
+    LDA #HI(MT_N)
+    STA k_counter + 1
+
+.loop1
+    ; Load state[i-1]
+    JSR calc_state_ptr
+    SEC
+    LDA state_ptr
+    SBC #4
+    STA state_ptr
+    LDA state_ptr + 1
+    SBC #0
+    STA state_ptr + 1
+    LDY #0
+    LDA (state_ptr), Y
+    STA w0 + 0
+    INY
+    LDA (state_ptr), Y
+    STA w0 + 1
+    INY
+    LDA (state_ptr), Y
+    STA w0 + 2
+    INY
+    LDA (state_ptr), Y
+    STA w0 + 3
+
+    ; w1 = w0
+    LDA #w0 : LDX #w1 : JSR copy32
+
+    ; w0 = w0 >> 30
+    LDA #30
+    JSR shr_w0
+
+    ; w0 = state[i-1] XOR (state[i-1] >> 30)
+    JSR xor_w1_into_w0
+
+    ; w1 = 1664525 (&0019660D)
+    LDA #&0D
+    STA w1 + 0
+    LDA #&66
+    STA w1 + 1
+    LDA #&19
+    STA w1 + 2
+    LDA #&00
+    STA w1 + 3
+
+    ; w0 = w0 * 1664525
+    JSR multiply_w0_by_w1
+
+    ; Save multiply result to w1
+    LDA #w0 : LDX #w1 : JSR copy32
+
+    ; Load state[i] into w0
+    JSR load_state
+
+    ; w0 = state[i] XOR (previous calculation in w1)
+    JSR xor_w1_into_w0
+
+    ; Add init_key[j] (from entropy array)
+    LDA entropy_idx
+    ASL A
+    ASL A
+    TAY
+    LDA entropy_array + 0, Y
+    STA w1 + 0
+    LDA entropy_array + 1, Y
+    STA w1 + 1
+    LDA entropy_array + 2, Y
+    STA w1 + 2
+    LDA entropy_array + 3, Y
+    STA w1 + 3
+    JSR add_w1_to_w0
+
+    ; Add j
+    LDA entropy_idx
+    STA w1 + 0
+    LDA #0
+    STA w1 + 1
+    STA w1 + 2
+    STA w1 + 3
+    JSR add_w1_to_w0
+
+    ; Store to state[i]
+    JSR store_state
+
+    ; i++
+    INC loop_index
+    BNE no_wrap1
+    INC loop_index + 1
+.no_wrap1
+    ; if i >= N, i = 1, state[0] = state[N-1]
+    LDA loop_index + 1
+    CMP #HI(MT_N)
+    BCC no_iwrap1
+    BNE do_iwrap1
+    LDA loop_index
+    CMP #LO(MT_N)
+    BCC no_iwrap1
+.do_iwrap1
+    ; Copy state[N-1] to state[0]
+    LDA #LO(MT_N - 1)
+    STA loop_index
+    LDA #HI(MT_N - 1)
+    STA loop_index + 1
+    JSR load_state
+    LDA #0
+    STA loop_index
+    STA loop_index + 1
+    JSR store_state
+    ; i = 1
+    LDA #1
+    STA loop_index
+    LDA #0
+    STA loop_index + 1
+.no_iwrap1
+
+    ; j++, if j >= key_length, j = 0
+    INC entropy_idx
+    LDA entropy_idx
+    CMP #ENTROPY_COUNT
+    BCC no_jwrap1
+    LDA #0
+    STA entropy_idx
+.no_jwrap1
+
+    ; k--
+    LDA k_counter
+    SEC
+    SBC #1
+    STA k_counter
+    LDA k_counter + 1
+    SBC #0
+    STA k_counter + 1
+    ; if k > 0, continue
+    ORA k_counter
+    BEQ loop1_done
+    JMP loop1
+.loop1_done
+
+    ; Second loop: k = N-1
+    LDA #LO(MT_N - 1)
+    STA k_counter
+    LDA #HI(MT_N - 1)
+    STA k_counter + 1
+
+.loop2
+    ; Load state[i-1]
+    JSR calc_state_ptr
+    SEC
+    LDA state_ptr
+    SBC #4
+    STA state_ptr
+    LDA state_ptr + 1
+    SBC #0
+    STA state_ptr + 1
+    LDY #0
+    LDA (state_ptr), Y
+    STA w0 + 0
+    INY
+    LDA (state_ptr), Y
+    STA w0 + 1
+    INY
+    LDA (state_ptr), Y
+    STA w0 + 2
+    INY
+    LDA (state_ptr), Y
+    STA w0 + 3
+
+    ; w1 = w0
+    LDA #w0 : LDX #w1 : JSR copy32
+
+    ; w0 = w0 >> 30
+    LDA #30
+    JSR shr_w0
+
+    ; w0 = state[i-1] XOR (state[i-1] >> 30)
+    JSR xor_w1_into_w0
+
+    ; w1 = 1566083941 (&5D588B65)
+    LDA #&65
+    STA w1 + 0
+    LDA #&8B
+    STA w1 + 1
+    LDA #&58
+    STA w1 + 2
+    LDA #&5D
+    STA w1 + 3
+
+    ; w0 = w0 * 1566083941
+    JSR multiply_w0_by_w1
+
+    ; Save multiply result to w1
+    LDA #w0 : LDX #w1 : JSR copy32
+
+    ; Load state[i] into w0
+    JSR load_state
+
+    ; w0 = state[i] XOR (previous calculation in w1)
+    JSR xor_w1_into_w0
+
+    ; Subtract i (w0 = w0 - i)
+    SEC
+    LDA w0 + 0
+    SBC loop_index
+    STA w0 + 0
+    LDA w0 + 1
+    SBC loop_index + 1
+    STA w0 + 1
+    LDA w0 + 2
+    SBC #0
+    STA w0 + 2
+    LDA w0 + 3
+    SBC #0
+    STA w0 + 3
+
+    ; Store to state[i]
+    JSR store_state
+
+    ; i++
+    INC loop_index
+    BNE no_wrap2
+    INC loop_index + 1
+.no_wrap2
+    ; if i >= N, i = 1, state[0] = state[N-1]
+    LDA loop_index + 1
+    CMP #HI(MT_N)
+    BCC no_iwrap2
+    BNE do_iwrap2
+    LDA loop_index
+    CMP #LO(MT_N)
+    BCC no_iwrap2
+.do_iwrap2
+    ; Copy state[N-1] to state[0]
+    LDA #LO(MT_N - 1)
+    STA loop_index
+    LDA #HI(MT_N - 1)
+    STA loop_index + 1
+    JSR load_state
+    LDA #0
+    STA loop_index
+    STA loop_index + 1
+    JSR store_state
+    ; i = 1
+    LDA #1
+    STA loop_index
+    LDA #0
+    STA loop_index + 1
+.no_iwrap2
+
+    ; k--
+    LDA k_counter
+    SEC
+    SBC #1
+    STA k_counter
+    LDA k_counter + 1
+    SBC #0
+    STA k_counter + 1
+    ; if k > 0, continue
+    ORA k_counter
+    BEQ loop2_done
+    JMP loop2
+.loop2_done
+
+    ; state[0] = 0x80000000
+    LDA #0
+    STA loop_index
+    STA loop_index + 1
+    LDA #0
+    STA w0 + 0
+    STA w0 + 1
+    STA w0 + 2
+    LDA #&80
+    STA w0 + 3
+    JSR store_state
+
+    ; Reset index to force twist
     LDA #LO(MT_N)
     STA mt_index
     LDA #HI(MT_N)
@@ -704,6 +1187,11 @@ ORG &2000
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 .end
+
+.state_array    SKIP MT_N * 4
+.entropy_array  SKIP ENTROPY_COUNT * 4
+.load_buffer    SKIP 64
+
 SAVE "Code", start, end
 
 ; Dummy files purely to seek to.
