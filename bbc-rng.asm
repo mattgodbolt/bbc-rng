@@ -59,7 +59,7 @@ ORG &2000
     JSR printHex
     JSR newline
 
-\ First 10 values for seed 5489 should be:
+\ First 10 values for seed 5489 should be: https://godbolt.org/z/4bK4xbP4a
 \ 0xD091BB5C
 \ 0x22AE9EF6
 \ 0xE7E1FAEE
@@ -134,6 +134,54 @@ ORG &2000
 .loop
     LDA w0, X
     STA w1, X
+    DEX
+    BPL loop
+    RTS
+}
+
+\ Copy w0 to w2
+.copy_w0_to_w2
+{
+    LDX #3
+.loop
+    LDA w0, X
+    STA w2, X
+    DEX
+    BPL loop
+    RTS
+}
+
+\ Copy w2 to w1
+.copy_w2_to_w1
+{
+    LDX #3
+.loop
+    LDA w2, X
+    STA w1, X
+    DEX
+    BPL loop
+    RTS
+}
+
+\ Copy w3 to w1
+.copy_w3_to_w1
+{
+    LDX #3
+.loop
+    LDA w3, X
+    STA w1, X
+    DEX
+    BPL loop
+    RTS
+}
+
+\ Copy w0 to w3
+.copy_w0_to_w3
+{
+    LDX #3
+.loop
+    LDA w0, X
+    STA w3, X
     DEX
     BPL loop
     RTS
@@ -367,23 +415,28 @@ ORG &2000
     STA loop_index + 1
 
 .init_loop
-    ; Load state[i-1]
-    ; Decrement loop_index temporarily
-    LDA loop_index
+    ; Load state[i-1] by computing ptr for i then subtracting 4
+    JSR calc_state_ptr
     SEC
-    SBC #1
-    STA loop_index
-    LDA loop_index + 1
+    LDA state_ptr
+    SBC #4
+    STA state_ptr
+    LDA state_ptr + 1
     SBC #0
-    STA loop_index + 1
-
-    JSR load_state
-
-    ; Increment back to i
-    INC loop_index
-    BNE no_carry1
-    INC loop_index + 1
-.no_carry1
+    STA state_ptr + 1
+    ; Load from state_ptr (which now points to state[i-1])
+    LDY #0
+    LDA (state_ptr), Y
+    STA w0 + 0
+    INY
+    LDA (state_ptr), Y
+    STA w0 + 1
+    INY
+    LDA (state_ptr), Y
+    STA w0 + 2
+    INY
+    LDA (state_ptr), Y
+    STA w0 + 3
 
     ; w1 = w0 (save original)
     JSR copy_w0_to_w1
@@ -458,21 +511,16 @@ ORG &2000
 .twist_loop
     ; w0 = state[i] & UPPER_MASK
     JSR load_state
-    LDA #&00
-    STA w1 + 0
-    STA w1 + 1
-    STA w1 + 2
-    LDA #&80
-    STA w1 + 3              ; w1 = UPPER_MASK
-    JSR and_w1_with_w0
+    LDA w0 + 3
+    AND #&80
+    STA w0 + 3
+    LDA #0
+    STA w0 + 0
+    STA w0 + 1
+    STA w0 + 2
 
     ; Save (state[i] & UPPER_MASK) to w2
-    LDX #3
-.save_upper
-    LDA w0, X
-    STA w2, X
-    DEX
-    BPL save_upper
+    JSR copy_w0_to_w2
 
     ; Save current i to temp+2,temp+3
     LDA loop_index
@@ -503,31 +551,18 @@ ORG &2000
 .load_next
     ; w0 = state[(i+1) mod N] & LOWER_MASK
     JSR load_state
-    LDA #&FF
-    STA w1 + 0
-    STA w1 + 1
-    STA w1 + 2
-    LDA #&7F
-    STA w1 + 3              ; w1 = LOWER_MASK
-    JSR and_w1_with_w0
+    LDA w0 + 3
+    AND #&7F
+    STA w0 + 3
+    ; Lower 3 bytes unchanged
 
     ; w0 = (state[i] & UPPER) | (state[i+1] & LOWER)
     ; w2 has upper part
-    LDX #3
-.or_parts
-    LDA w2, X
-    STA w1, X
-    DEX
-    BPL or_parts
+    JSR copy_w2_to_w1
     JSR or_w1_with_w0
 
     ; Save y to w2
-    LDX #3
-.save_y
-    LDA w0, X
-    STA w2, X
-    DEX
-    BPL save_y
+    JSR copy_w0_to_w2
 
     ; Check if y is odd (save flag)
     LDA w2 + 0
@@ -554,12 +589,7 @@ ORG &2000
 
 .not_odd
     ; Save (y >> 1) XOR mag to w3
-    LDX #3
-.save_mag
-    LDA w0, X
-    STA w3, X
-    DEX
-    BPL save_mag
+    JSR copy_w0_to_w3
 
     ; Calculate (i + M) mod N
     ; Restore i to loop_index
@@ -600,12 +630,7 @@ ORG &2000
     JSR load_state
 
     ; w0 = state[(i+M) mod N] XOR w3
-    LDX #3
-.xor_mag
-    LDA w3, X
-    STA w1, X
-    DEX
-    BPL xor_mag
+    JSR copy_w3_to_w1
     JSR xor_w1_into_w0
 
     ; Restore i and store result
@@ -664,32 +689,17 @@ ORG &2000
     JSR load_state
     
     ; Save original y to w2
-    LDX #3
-.save_y
-    LDA w0, X
-    STA w2, X
-    DEX
-    BPL save_y
+    JSR copy_w0_to_w2
 
     ; y ^= (y >> 11)
     LDA #11
     JSR shr_w0
     ; Copy w2 (original) to w1 for XOR
-    LDX #3
-.copy_for_xor1
-    LDA w2, X
-    STA w1, X
-    DEX
-    BPL copy_for_xor1
+    JSR copy_w2_to_w1
     JSR xor_w1_into_w0
-    
+
     ; Save y
-    LDX #3
-.save1
-    LDA w0, X
-    STA w2, X
-    DEX
-    BPL save1
+    JSR copy_w0_to_w2
     
     ; y ^= (y << 7) & 0x9D2C5680
     JSR copy_w0_to_w1
@@ -705,22 +715,12 @@ ORG &2000
     LDA #&9D
     STA w1 + 3
     JSR and_w1_with_w0
-    
-    LDX #3
-.restore1
-    LDA w2, X
-    STA w1, X
-    DEX
-    BPL restore1
+
+    JSR copy_w2_to_w1
     JSR xor_w1_into_w0
-    
+
     ; Save y
-    LDX #3
-.save2
-    LDA w0, X
-    STA w2, X
-    DEX
-    BPL save2
+    JSR copy_w0_to_w2
     
     ; y ^= (y << 15) & 0xEFC60000
     JSR copy_w0_to_w1
@@ -735,13 +735,8 @@ ORG &2000
     LDA #&EF
     STA w1 + 3
     JSR and_w1_with_w0
-    
-    LDX #3
-.restore2
-    LDA w2, X
-    STA w1, X
-    DEX
-    BPL restore2
+
+    JSR copy_w2_to_w1
     JSR xor_w1_into_w0
     
     ; y ^= (y >> 18)
