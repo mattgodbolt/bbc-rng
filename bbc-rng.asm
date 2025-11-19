@@ -127,61 +127,15 @@ ORG &2000
 \ 32-bit arithmetic helpers
 \ ============================================================================
 
-\ Copy w0 to w1
-.copy_w0_to_w1
+\ Copy 4 bytes from zp address A to zp address X
+.copy32
 {
+    STA src+1
+    STX dst+1
     LDX #3
 .loop
-    LDA w0, X
-    STA w1, X
-    DEX
-    BPL loop
-    RTS
-}
-
-\ Copy w0 to w2
-.copy_w0_to_w2
-{
-    LDX #3
-.loop
-    LDA w0, X
-    STA w2, X
-    DEX
-    BPL loop
-    RTS
-}
-
-\ Copy w2 to w1
-.copy_w2_to_w1
-{
-    LDX #3
-.loop
-    LDA w2, X
-    STA w1, X
-    DEX
-    BPL loop
-    RTS
-}
-
-\ Copy w3 to w1
-.copy_w3_to_w1
-{
-    LDX #3
-.loop
-    LDA w3, X
-    STA w1, X
-    DEX
-    BPL loop
-    RTS
-}
-
-\ Copy w0 to w3
-.copy_w0_to_w3
-{
-    LDX #3
-.loop
-    LDA w0, X
-    STA w3, X
+.src LDA &00, X
+.dst STA &00, X
     DEX
     BPL loop
     RTS
@@ -439,7 +393,7 @@ ORG &2000
     STA w0 + 3
 
     ; w1 = w0 (save original)
-    JSR copy_w0_to_w1
+    LDA #w0 : LDX #w1 : JSR copy32
 
     ; w0 = w0 >> 30
     LDA #30
@@ -520,7 +474,7 @@ ORG &2000
     STA w0 + 2
 
     ; Save (state[i] & UPPER_MASK) to w2
-    JSR copy_w0_to_w2
+    LDA #w0 : LDX #w2 : JSR copy32
 
     ; Save current i to temp+2,temp+3
     LDA loop_index
@@ -558,11 +512,11 @@ ORG &2000
 
     ; w0 = (state[i] & UPPER) | (state[i+1] & LOWER)
     ; w2 has upper part
-    JSR copy_w2_to_w1
+    LDA #w2 : LDX #w1 : JSR copy32
     JSR or_w1_with_w0
 
     ; Save y to w2
-    JSR copy_w0_to_w2
+    LDA #w0 : LDX #w2 : JSR copy32
 
     ; Check if y is odd (save flag)
     LDA w2 + 0
@@ -589,7 +543,7 @@ ORG &2000
 
 .not_odd
     ; Save (y >> 1) XOR mag to w3
-    JSR copy_w0_to_w3
+    LDA #w0 : LDX #w3 : JSR copy32
 
     ; Calculate (i + M) mod N
     ; Restore i to loop_index
@@ -630,7 +584,7 @@ ORG &2000
     JSR load_state
 
     ; w0 = state[(i+M) mod N] XOR w3
-    JSR copy_w3_to_w1
+    LDA #w3 : LDX #w1 : JSR copy32
     JSR xor_w1_into_w0
 
     ; Restore i and store result
@@ -689,20 +643,20 @@ ORG &2000
     JSR load_state
     
     ; Save original y to w2
-    JSR copy_w0_to_w2
+    LDA #w0 : LDX #w2 : JSR copy32
 
     ; y ^= (y >> 11)
     LDA #11
     JSR shr_w0
     ; Copy w2 (original) to w1 for XOR
-    JSR copy_w2_to_w1
+    LDA #w2 : LDX #w1 : JSR copy32
     JSR xor_w1_into_w0
 
     ; Save y
-    JSR copy_w0_to_w2
+    LDA #w0 : LDX #w2 : JSR copy32
     
     ; y ^= (y << 7) & 0x9D2C5680
-    JSR copy_w0_to_w1
+    LDA #w0 : LDX #w1 : JSR copy32
     LDA #7
     JSR shl_w0
     
@@ -716,14 +670,14 @@ ORG &2000
     STA w1 + 3
     JSR and_w1_with_w0
 
-    JSR copy_w2_to_w1
+    LDA #w2 : LDX #w1 : JSR copy32
     JSR xor_w1_into_w0
 
     ; Save y
-    JSR copy_w0_to_w2
+    LDA #w0 : LDX #w2 : JSR copy32
     
     ; y ^= (y << 15) & 0xEFC60000
-    JSR copy_w0_to_w1
+    LDA #w0 : LDX #w1 : JSR copy32
     LDA #15
     JSR shl_w0
     
@@ -736,22 +690,17 @@ ORG &2000
     STA w1 + 3
     JSR and_w1_with_w0
 
-    JSR copy_w2_to_w1
+    LDA #w2 : LDX #w1 : JSR copy32
     JSR xor_w1_into_w0
     
     ; y ^= (y >> 18)
-    JSR copy_w0_to_w1
+    LDA #w0 : LDX #w1 : JSR copy32
     LDA #18
     JSR shr_w0
     JSR xor_w1_into_w0
     
     ; Store result
-    LDX #3
-.store_result
-    LDA w0, X
-    STA result, X
-    DEX
-    BPL store_result
+    LDA #w0 : LDX #result : JSR copy32
     
     ; Increment index
     INC mt_index
