@@ -38,14 +38,10 @@ ORG &2000
 
     ; Collect entropy from disc seeks and initialize MT
     JSR collect_entropy
-    LDA #LO(init_array_msg):STA ptr
-    LDA #HI(init_array_msg):STA ptr+1
-    JSR print
+    JSR print0: EQUS 134, "Initialising MT19937 with entropy...", 10, 13, 0
     JSR mt_init_by_array
 
-    LDA #LO(here_we_go):STA ptr
-    LDA #HI(here_we_go):STA ptr+1
-    JSR print
+    JSR print0: EQUS 134, "Generating random numbers:", 10, 13, 0
 
     ; Generate first 10 numbers and print them
     LDX #10
@@ -53,6 +49,7 @@ ORG &2000
     TXA:PHA
     JSR mt_rand
 
+    LDA #130:JSR oswrch
     LDA result + 3
     JSR printHex
     LDA result + 2
@@ -70,12 +67,18 @@ ORG &2000
 .done
     JMP done
 
-.init_array_msg EQUS "Initialising MT19937 with entropy...", 10, 13, 0
-.title EQUS 141, 134, "BBC Micro disc Drive RNG", 10, 13, 0
-.here_we_go EQUS 10, 13, "Generating random numbers:", 10, 13, 0
+.title EQUS 141, 129, "BBC Micro", 133, "Disc Drive RNG", 10, 13, 0
 
 .newline
     lda #10:JSR oswrch:lda #13:JMP oswrch
+
+.print0
+    PLA: CLC: ADC #1: STA ptr
+    PLA: ADC #0 : STA ptr+1
+    JSR print
+    TYA: CLC: ADC ptr: STA ptr
+    LDA#0: ADC ptr+1: PHA
+    LDA ptr: PHA: RTS
 
 .print
 {
@@ -290,10 +293,7 @@ ORG &2000
 \ Performs 32 disc seeks, mixing timing into 16 entropy words
 .collect_entropy
 {
-    LDA #LO(msg):STA ptr
-    LDA #HI(msg):STA ptr+1
-    JSR print
-
+    JSR print0: EQUS 134, "Collecting entropy...", 10, 13, 0
     JSR zero_entropy
 
     ; Get initial file from timer
@@ -305,7 +305,7 @@ ORG &2000
     LDA #0
     STA entropy_idx
 
-    ; Loop counter in temp (reuse)
+    ; Loop counter
     LDA #32
     STA temp
 
@@ -330,7 +330,10 @@ ORG &2000
 
     LDA w0: JSR printHex
     LDA w0 + 1: JSR printHex
-    JSR newline
+    LDA #131: JSR oswrch
+    LDA #'(': JSR oswrch
+    LDA temp: JSR printHex
+    JSR print0: EQUS "/20)", 13, 0
 
     ; Mix into entropy[entropy_idx]
     ; entropy = ROL(entropy, 5) XOR sample
@@ -411,7 +414,6 @@ ORG &2000
 
 .collect_done
     RTS
-.msg EQUS "Collecting entropy...", 0
 }
 
 \ Load file D.{current_file}
@@ -428,25 +430,20 @@ ORG &2000
 .store_char
     STA filename + 2
 
-    LDA #LO(loading_msg):STA ptr
-    LDA #HI(loading_msg):STA ptr+1
-    JSR print
-    LDA filename: JSR oswrch
-    LDA filename+1: JSR oswrch
+    JSR print0: EQUS 131, "Timing D.", 0
     LDA filename+2: JSR oswrch
-    LDA #32: JSR oswrch
+    LDA #129: JSR oswrch
 
     LDA #&FF
     LDX #LO(osfile_block)
     LDY #HI(osfile_block)
     JMP osfile
-.loading_msg EQUS "Timing ", 0
 }
 
 .filename EQUS "D.0", 13
 .osfile_block
-    EQUD filename
-    EQUD load_buffer
+    EQUW filename
+    EQUD load_buffer ; TODO no idea why this isn't be honoured. I had to hack the load address in the SAVE
     EQUD 0
     EQUD 0
     EQUD 0
@@ -1187,12 +1184,12 @@ ORG &2000
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 .end
+SAVE "Code", start, end
 
+DUMMY_FILE_SIZE = 4096
 .state_array    SKIP MT_N * 4
 .entropy_array  SKIP ENTROPY_COUNT * 4
-.load_buffer    SKIP 64
-
-SAVE "Code", start, end
+.load_buffer    SKIP DUMMY_FILE_SIZE
 
 ; Dummy files purely to seek to.
 {
@@ -1200,6 +1197,6 @@ ORG 0
 .data EQUS "I am just data we don't care about"
 .end
 FOR n, 0, 15
-    SAVE "D."+STR$~(n), data, end, 0, 0
+    SAVE "D."+STR$~(n), data, data + DUMMY_FILE_SIZE, 0, load_buffer
 NEXT
 }
