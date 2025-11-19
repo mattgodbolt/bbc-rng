@@ -1,5 +1,6 @@
 oswrch = &FFEE
 ptr = &70
+rngseed = &72
 
 ORG &2000
 
@@ -10,20 +11,48 @@ ORG &2000
     LDA #title DIV 256:STA ptr+1
     JSR print
     JSR print
+    jsr newline
 
-    lda #10:JSR oswrch:lda #13: JSR oswrch
+    lda #&e1:sta rngseed
+    lda #&ac:sta rngseed+1
 
-    LDA #$01
-    JSR printHex
-    LDA #$23
-    JSR printHex
-    LDA #$fe
-    JSR printHex
-    LDA #$9a
-    JSR printHex
+    LDY #16
+.loop
+    jsr rng8bits:jsr printHex
+    DEY: BNE loop
+    jsr newline
 
 .done
     JMP done
+
+.newline
+    lda #10:JSR oswrch:lda #13:JMP oswrch
+
+.rng8bits
+{
+    LDX #8
+.loop
+    JSR rng1bit
+    ROL A
+    DEX
+    BNE loop
+    RTS
+}
+
+.rng1bit ; carry bit has the new random bit
+{
+    LDA rngseed
+    LSR A: LSR A: STA ptr ; lfsr >> 2
+    LSR a: STA ptr+1 ; lfsr >> 3
+    LSR A: LSR A ; lfsr >> 5
+    EOR ptr+1
+    EOR ptr
+    AND #1
+    CMP #1 ; carry set if bit 0 was 1
+    LDA rngseed+1: ROR A: sta rngseed+1
+    LDA rngseed: ROR A: sta rngseed
+    rts
+}
 
 .print
 {
