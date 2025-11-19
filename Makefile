@@ -2,10 +2,10 @@ BEEBASM?=beebasm
 BEEBASMOPTS=-v
 
 .PHONY: default
-default: example.ssd
+default: bbc-rng.ssd
 
 %.ssd: %.asm
-	$(BEEBASM) -i $< -do $@ -boot MyCode $(BEEBASMOPTS)
+	$(BEEBASM) -i $< -do $@ -boot Code $(BEEBASMOPTS)
 
 .PHONY: clean
 clean:
