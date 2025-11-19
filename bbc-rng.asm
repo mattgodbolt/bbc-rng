@@ -42,7 +42,7 @@ ORG &2000
     STA w0 + 2
     STA w0 + 3
     JSR mt_init
-    
+
     ; Generate first 10 numbers and print them
     LDX #10
 .loop
@@ -210,14 +210,18 @@ ORG &2000
 .add_w1_to_w0
 {
     CLC
-    LDX #0
-.loop
-    LDA w0, X
-    ADC w1, X
-    STA w0, X
-    INX
-    CPX #4
-    BNE loop
+    LDA w0 + 0
+    ADC w1 + 0
+    STA w0 + 0
+    LDA w0 + 1
+    ADC w1 + 1
+    STA w0 + 1
+    LDA w0 + 2
+    ADC w1 + 2
+    STA w0 + 2
+    LDA w0 + 3
+    ADC w1 + 3
+    STA w0 + 3
     RTS
 }
 
@@ -250,14 +254,18 @@ ORG &2000
     
     ; Add temp to w0
     CLC
-    LDY #0
-.add_loop
-    LDA w0, Y
-    ADC temp, Y
-    STA w0, Y
-    INY
-    CPY #4
-    BNE add_loop
+    LDA w0 + 0
+    ADC temp + 0
+    STA w0 + 0
+    LDA w0 + 1
+    ADC temp + 1
+    STA w0 + 1
+    LDA w0 + 2
+    ADC temp + 2
+    STA w0 + 2
+    LDA w0 + 3
+    ADC temp + 3
+    STA w0 + 3
     
 .skip_add
     ; Shift temp left
