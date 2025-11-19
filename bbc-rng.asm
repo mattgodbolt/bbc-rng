@@ -6,9 +6,22 @@ ORG &2000
 .start
     LDA #22:JSR oswrch
     LDA #7:JSR oswrch
-    LDA #mytext MOD 256:STA ptr
-    LDA #mytext DIV 256:STA ptr+1
+    LDA #title MOD 256:STA ptr
+    LDA #title DIV 256:STA ptr+1
     JSR print
+    JSR print
+
+    lda #10:JSR oswrch:lda #13: JSR oswrch
+
+    LDA #$01
+    JSR printHex
+    LDA #$23
+    JSR printHex
+    LDA #$fe
+    JSR printHex
+    LDA #$9a
+    JSR printHex
+
 .done
     JMP done
 
@@ -25,7 +38,30 @@ ORG &2000
     RTS
 }
 
-.mytext EQUS "BBC Micro Disk Drive RNG", 10, 13, 0
+.printHex
+{
+    PHA
+    LSR A
+    LSR A
+    LSR A
+    LSR A
+    JSR printNibble
+    PLA
+    AND #$0F
+    JMP printNibble
+.printNibble
+    CMP #10
+    BCC isDigit
+    ADC #(97 - 10 - 1)
+    JMP oswrch
+.isDigit
+    ADC #$30
+.done
+    JSR oswrch
+    RTS
+}
+
+.title EQUS 141, 134, "BBC Micro Disk Drive RNG", 10, 13, 0
 .end
 
 SAVE "Code", start, end
