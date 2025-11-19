@@ -43,8 +43,7 @@ ORG &2000
 
     JSR print0: EQUS 134, "Generating random numbers:", 10, 13, 0
 
-    ; Generate first 10 numbers and print them
-    LDX #10
+    LDX #18
 .loop
     TXA:PHA
     JSR mt_rand
@@ -290,7 +289,7 @@ ORG &2000
 }
 
 \ Collect entropy from disc seeks
-\ Performs 32 disc seeks, mixing timing into 16 entropy words
+\ Performs a number of disc seeks, mixing timing into 16 entropy words
 .collect_entropy
 {
     JSR print0: EQUS 134, "Collecting entropy...", 10, 13, 0
@@ -305,8 +304,9 @@ ORG &2000
     LDA #0
     STA entropy_idx
 
-    ; Loop counter
-    LDA #32
+    ; Loop counter (two samples per entropy word)
+ENTROPY_SAMPLES = ENTROPY_COUNT * 2
+    LDA #ENTROPY_SAMPLES
     STA temp
 
 .collect_loop
@@ -332,8 +332,8 @@ ORG &2000
     LDA w0 + 1: JSR printHex
     LDA #131: JSR oswrch
     LDA #'(': JSR oswrch
-    LDA #31: SEC: SBC temp: JSR printHex
-    JSR print0: EQUS "/20)", 13, 0
+    LDA #33: SEC: SBC temp: JSR printHex
+    JSR print0: EQUS "/", STR$~(ENTROPY_SAMPLES),")", 13, 0
 
     ; Mix into entropy[entropy_idx]
     ; entropy = ROL(entropy, 5) XOR sample
@@ -395,11 +395,13 @@ ORG &2000
     LDA w2 + 3
     STA (state_ptr), Y
 
-    ; Update entropy_idx = (entropy_idx + 1) AND 15
+    ; Update entropy_idx
     LDA entropy_idx
-    CLC
-    ADC #1
-    AND #&0F
+    CLC:ADC #1
+    CMP #ENTROPY_COUNT
+    BCC no_wrap
+    LDA #0
+.no_wrap
     STA entropy_idx
 
     ; Update current_file = sample AND &0F
@@ -413,7 +415,7 @@ ORG &2000
     JMP collect_loop
 
 .collect_done
-    RTS
+    JMP newline
 }
 
 \ Load file D.{current_file}
