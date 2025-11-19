@@ -227,12 +227,7 @@ ORG &2000
 .multiply_w0_by_w1
 {
     ; Save w0 to temp
-    LDX #3
-.save_loop
-    LDA w0, X
-    STA temp, X
-    DEX
-    BPL save_loop
+    LDA #w0 : LDX #temp : JSR copy32
     
     ; Zero w0 (will accumulate result)
     LDA #0
