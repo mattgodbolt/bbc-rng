@@ -211,19 +211,14 @@ ORG &2000
 \ Add w1 to w0: w0 = w0 + w1
 .add_w1_to_w0
 {
+    LDX #256-4          ; Start at -4, count up to 0
     CLC
-    LDA w0 + 0
-    ADC w1 + 0
-    STA w0 + 0
-    LDA w0 + 1
-    ADC w1 + 1
-    STA w0 + 1
-    LDA w0 + 2
-    ADC w1 + 2
-    STA w0 + 2
-    LDA w0 + 3
-    ADC w1 + 3
-    STA w0 + 3
+.loop
+    LDA w0+4, X         ; X=$FC accesses w0+0, etc.
+    ADC w1+4, X
+    STA w0+4, X
+    INX
+    BNE loop
     RTS
 }
 
