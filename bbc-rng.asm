@@ -43,20 +43,15 @@ ORG &2000
 
     JSR print0: EQUS 134, "Generating random numbers:", 10, 13, 0
 
-    LDX #18
+    LDX #8
 .loop
     TXA:PHA
-    JSR mt_rand
 
     LDA #130:JSR oswrch
-    LDA result + 3
-    JSR printHex
-    LDA result + 2
-    JSR printHex
-    LDA result + 1
-    JSR printHex
-    LDA result + 0
-    JSR printHex
+    JSR mt_rand:JSR print32result:lda #32: jsr oswrch
+    JSR mt_rand:JSR print32result:lda #32: jsr oswrch
+    JSR mt_rand:JSR print32result:lda #32: jsr oswrch
+    JSR mt_rand:JSR print32result
     JSR newline
 
     PLA:TAX    
@@ -70,6 +65,19 @@ ORG &2000
 
 .newline
     lda #10:JSR oswrch:lda #13:JMP oswrch
+
+.print32result
+{
+    ldy #3
+.loop
+    TYA:PHA
+    LDA result, Y
+    JSR printHex
+    PLA:TAY
+    DEY
+    bpl loop
+    RTS
+}
 
 .print0
     PLA: CLC: ADC #1: STA ptr
